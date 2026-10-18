@@ -5,6 +5,7 @@ from langchain.tools import tool
 from tavily import AsyncTavilyClient
 
 from deerflow.community.search_time_range import SearchTimeRange
+from deerflow.community.url_safety import safe_public_result_url as _safe_public_url
 from deerflow.config import get_app_config
 
 logger = logging.getLogger(__name__)
@@ -73,14 +74,30 @@ async def web_search_tool(query: str, time_range: SearchTimeRange | None = None)
     results = _response_objects(res, "results")
     if results is None:
         return json.dumps({"error": _FORMAT_ERROR, "query": query}, ensure_ascii=False)
-    normalized_results = [
-        {
-            "title": result.get("title") or "",
-            "url": result.get("url") or "",
-            "snippet": result.get("content") or "",
-        }
-        for result in results
-    ]
+    normalized_results = []
+    for result in results:
+        raw_url = result.get("url")
+        # Preserve backward compatibility: None/missing URLs normalize to ""
+        if raw_url is None:
+            normalized_results.append(
+                {
+                    "title": result.get("title") or "",
+                    "url": "",
+                    "snippet": result.get("content") or "",
+                }
+            )
+            continue
+        # Non-None URLs must be screened; hostile ones are dropped
+        screened_url = _safe_public_url(raw_url)
+        if not screened_url:
+            continue
+        normalized_results.append(
+            {
+                "title": result.get("title") or "",
+                "url": screened_url,
+                "snippet": result.get("content") or "",
+            }
+        )
     json_results = json.dumps(normalized_results, indent=2, ensure_ascii=False)
     return json_results
 
