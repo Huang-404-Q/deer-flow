@@ -170,15 +170,22 @@ def web_search_tool(query: str, max_results: int = 5, time_range: SearchTimeRang
     if not web_results:
         return json.dumps({"error": "No results found", "query": query}, ensure_ascii=False)
 
-    normalized_results = [
-        {
-            "title": r.get("title", ""),
-            "url": r.get("url", ""),
-            "content": r.get("description", ""),
-        }
-        for r in web_results
-        if isinstance(r, dict)
-    ]
+    normalized_results = []
+    for r in web_results:
+        if not isinstance(r, dict):
+            continue
+        raw_url = r.get("url", "")
+        screened_url = _safe_public_url(raw_url) if raw_url else ""
+        if not screened_url:
+            continue
+        normalized_results.append(
+            {
+                "title": r.get("title", ""),
+                "url": screened_url,
+                "content": r.get("description", ""),
+            }
+        )
+
     if not normalized_results:
         logger.error("Brave Search returned 'web.results' with no usable result objects")
         return _unexpected_format_error(query)
