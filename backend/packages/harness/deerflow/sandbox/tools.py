@@ -1154,6 +1154,33 @@ def _non_file_url_spans(command: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _single_quote_spans(command: str) -> list[tuple[int, int]]:
+    """Extract the spans of single-quoted strings in a shell command.
+
+    Single-quoted strings in shell have no expansions: $NAME, ~, and {braces}
+    are literal. This lets us distinguish between ``$NF/2`` inside an awk
+    program (literal text, not a path) and ``$HOME/.ssh`` outside quotes
+    (will expand to a host path).
+
+    Returns:
+        A list of (start, end) spans for each single-quoted region.
+    """
+    spans = []
+    i = 0
+    while i < len(command):
+        if command[i] == "'":
+            start = i
+            i += 1
+            while i < len(command) and command[i] != "'":
+                i += 1
+            if i < len(command):
+                spans.append((start, i + 1))
+            i += 1
+        else:
+            i += 1
+    return spans
+
+
 def _is_in_spans(position: int, spans: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in spans)
 
@@ -1491,6 +1518,7 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
     _validate_local_bash_shell_tokens(command, allowed_paths, tokens, thread_data)
     path_token_occurrences = _absolute_path_token_occurrences(command, tokens)
     url_spans = _non_file_url_spans(command)
+    single_quote_spans = _single_quote_spans(command)
 
     for match in _ABSOLUTE_PATH_PATTERN.finditer(command):
         if _is_in_spans(match.start(), url_spans):
@@ -1521,9 +1549,15 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
             continue
         # ``$1/1024`` and ``$1/$2`` are awk-style field arithmetic
         # (``awk '{print $1/$2}'``), not paths: standard top-level host
-        # directories do not start with a digit.
-        if name.isdigit() and remainder.removeprefix("$")[:1].isdigit():
-            continue
+        # directories do not start with a digit. Same for ``$NF/2`` and
+        # ``$sum/$n`` inside single-quoted awk programs: the variable name
+        # does not matter when the slash is followed by a digit or another
+        # variable and the whole expression sits inside literal text.
+        in_single_quotes = _is_in_spans(match.start(), single_quote_spans)
+        remainder_first = remainder[:1]
+        if remainder_first.isdigit() or remainder_first == "$":
+            if name.isdigit() or in_single_quotes:
+                continue
         unsafe_paths.append(match.group() + remainder)
 
     for match in _NAMED_TILDE_PATH_PATTERN.finditer(command):

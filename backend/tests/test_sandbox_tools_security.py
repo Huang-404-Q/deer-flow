@@ -1113,6 +1113,9 @@ def test_validate_local_bash_command_paths_blocks_variable_prefixed_host_paths(c
         # awk field arithmetic is not a path.
         "du -k /mnt/user-data/workspace | awk '{print $1/1024}'",
         "awk -F, '{print $1/$2}' /mnt/user-data/uploads/data.csv",
+        # awk field arithmetic with named variables (regression: #7021).
+        "awk '{print $NF/2}' /mnt/user-data/workspace/data.txt",
+        "awk '{print $sum/$n}' /mnt/user-data/workspace/data.txt",
     ],
 )
 def test_validate_local_bash_command_paths_allows_non_path_variable_uses(command: str) -> None:
