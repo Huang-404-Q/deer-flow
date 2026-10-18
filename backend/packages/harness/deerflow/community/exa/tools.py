@@ -4,6 +4,7 @@ import logging
 from exa_py import Exa
 from langchain.tools import tool
 
+from deerflow.community.url_safety import safe_public_result_url as _safe_public_url
 from deerflow.config import get_app_config
 
 logger = logging.getLogger(__name__)
@@ -71,14 +72,30 @@ def web_search_tool(query: str) -> str:
             contents={"highlights": {"max_characters": contents_max_characters}},
         )
 
-        normalized_results = [
-            {
-                "title": result.title or "",
-                "url": result.url or "",
-                "snippet": "\n".join(result.highlights) if result.highlights else "",
-            }
-            for result in res.results
-        ]
+        normalized_results = []
+        for result in res.results:
+            raw_url = result.url
+            # Preserve backward compatibility: None/missing URLs normalize to ""
+            if raw_url is None:
+                normalized_results.append(
+                    {
+                        "title": result.title or "",
+                        "url": "",
+                        "snippet": "\n".join(result.highlights) if result.highlights else "",
+                    }
+                )
+                continue
+            # Non-None URLs must be screened; hostile ones are dropped
+            screened_url = _safe_public_url(raw_url)
+            if not screened_url:
+                continue
+            normalized_results.append(
+                {
+                    "title": result.title or "",
+                    "url": screened_url,
+                    "snippet": "\n".join(result.highlights) if result.highlights else "",
+                }
+            )
         json_results = json.dumps(normalized_results, indent=2, ensure_ascii=False)
         return json_results
     except Exception as e:
