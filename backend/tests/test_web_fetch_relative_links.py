@@ -87,22 +87,13 @@ def test_extract_article_uses_first_document_base(base, expected):
 
 
 def test_python_extraction_fallback_preserves_article_text(monkeypatch):
-    import subprocess
-
     from deerflow.utils import readability
 
-    original = readability.simple_json_from_html_string
-
-    def extract(html, *, use_readability):
-        if use_readability:
-            raise subprocess.CalledProcessError(1, "node")
-        return original(html, use_readability=False)
-
-    monkeypatch.setattr(readability, "simple_json_from_html_string", extract)
+    monkeypatch.setattr(readability, "_has_readability_js", lambda: False)
     article = ReadabilityExtractor().extract_article(_article('<a href="../next">Next</a>'), url=PAGE_URL)
-    # The existing Python fallback strips link markup; preserve its text contract.
-    assert "Next" in article.to_markdown()
-    assert "This article explains the documentation" in article.to_markdown()
+    markdown = article.to_markdown()
+    assert "[Next](https://example.com/next)" in markdown
+    assert "This article explains the documentation" in markdown
 
 
 @pytest.mark.parametrize("base", ["http://[broken", "data:text/plain,invalid", "javascript:void(0)", "about:blank", "mailto:help@example.com", "blob:https://example.com/id"])

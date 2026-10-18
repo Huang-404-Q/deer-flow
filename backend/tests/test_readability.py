@@ -8,9 +8,11 @@ from deerflow.utils.readability import Article, ReadabilityExtractor
 
 
 def test_extract_article_falls_back_when_readability_js_fails(monkeypatch):
-    """When Node-based readability fails, extraction should fall back to Python mode."""
+    """A Node extraction error falls back without losing resolved link targets."""
 
     calls: list[bool] = []
+
+    monkeypatch.setattr("deerflow.utils.readability._has_readability_js", lambda: True)
 
     def _fake_simple_json_from_html_string(html: str, use_readability: bool = False):
         calls.append(use_readability)
@@ -20,24 +22,64 @@ def test_extract_article_falls_back_when_readability_js_fails(monkeypatch):
                 cmd=["node", "ExtractArticle.js"],
                 stderr="boom",
             )
-        return {"title": "Fallback Title", "content": "<p>Fallback Content</p>"}
+        pytest.fail("The link-preserving fallback should not call readabilipy's attribute-stripping path")
 
     monkeypatch.setattr(
         "deerflow.utils.readability.simple_json_from_html_string",
         _fake_simple_json_from_html_string,
     )
 
-    article = ReadabilityExtractor().extract_article("<html><body>test</body></html>")
+    article = ReadabilityExtractor().extract_article(
+        '<html><head><title>Fallback Title</title></head><body><article><p>Fallback <a href="../next">Content</a></p></article></body></html>',
+        url="https://example.com/docs/current",
+    )
 
-    assert calls == [True, False]
+    assert calls == [True]
     assert article.title == "Fallback Title"
-    assert article.html_content == "<p>Fallback Content</p>"
+    assert "[Content](https://example.com/next)" in article.to_markdown()
+
+
+def test_extract_article_uses_link_preserving_fallback_when_node_is_unavailable(monkeypatch):
+    from deerflow.utils import readability
+
+    monkeypatch.setattr(readability, "_has_readability_js", lambda: False)
+    monkeypatch.setattr(
+        readability,
+        "simple_json_from_html_string",
+        lambda *args, **kwargs: pytest.fail("readabilipy should not run without its Node extractor"),
+    )
+
+    article = ReadabilityExtractor().extract_article(
+        '<html><body><article><p>Fallback <a href="../next">Content</a></p></article></body></html>',
+        url="https://example.com/docs/current",
+    )
+
+    assert "[Content](https://example.com/next)" in article.to_markdown()
+
+
+def test_readability_node_availability_probe_is_cached(monkeypatch):
+    from deerflow.utils import readability
+
+    calls = 0
+
+    def unavailable():
+        nonlocal calls
+        calls += 1
+        return False
+
+    monkeypatch.setattr(readability, "_READABILITY_JS_AVAILABLE", None)
+    monkeypatch.setattr(readability, "_readabilipy_have_node", unavailable)
+
+    assert readability._has_readability_js() is False
+    assert readability._has_readability_js() is False
+    assert calls == 1
 
 
 def test_extract_article_re_raises_unexpected_exception(monkeypatch):
     """Unexpected errors should be surfaced instead of silently falling back."""
 
     calls: list[bool] = []
+    monkeypatch.setattr("deerflow.utils.readability._has_readability_js", lambda: True)
 
     def _fake_simple_json_from_html_string(html: str, use_readability: bool = False):
         calls.append(use_readability)

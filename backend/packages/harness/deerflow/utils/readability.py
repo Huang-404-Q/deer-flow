@@ -1,6 +1,7 @@
 import logging
 import re
 import subprocess
+import threading
 from html import escape, unescape
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse, uses_relative
@@ -8,8 +9,12 @@ from urllib.parse import urljoin, urlparse, uses_relative
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from readabilipy import simple_json_from_html_string
+from readabilipy.simple_json import have_node as _readabilipy_have_node
 
 logger = logging.getLogger(__name__)
+
+_READABILITY_JS_AVAILABLE: bool | None = None
+_READABILITY_JS_PROBE_LOCK = threading.Lock()
 
 
 class Article:
@@ -83,6 +88,48 @@ def _resolve_html_urls(html: str, url: str) -> str:
     return resolver.result()
 
 
+def _has_readability_js() -> bool:
+    """Probe readabilipy's Node.js support once per process.
+
+    ``readabilipy.have_node`` can try to install its JavaScript dependencies.
+    Cache both outcomes and serialize the first probe so concurrent fetches do
+    not repeat a failing npm lookup or race through the install path.
+    """
+    global _READABILITY_JS_AVAILABLE
+
+    if _READABILITY_JS_AVAILABLE is not None:
+        return _READABILITY_JS_AVAILABLE
+
+    with _READABILITY_JS_PROBE_LOCK:
+        if _READABILITY_JS_AVAILABLE is None:
+            try:
+                _READABILITY_JS_AVAILABLE = bool(_readabilipy_have_node())
+            except Exception as exc:
+                logger.warning("Readability.js availability probe failed (%s); using Python fallback", type(exc).__name__)
+                _READABILITY_JS_AVAILABLE = False
+
+    return _READABILITY_JS_AVAILABLE
+
+
+def _link_preserving_python_fallback(html: str) -> dict[str, str | None]:
+    """Extract a useful HTML section while retaining resolved link attributes.
+
+    readabilipy's built-in Python tree fallback intentionally drops element
+    attributes, including ``href`` and ``src``. Keeping the selected source
+    HTML lets ``Article.to_markdown`` preserve the destinations resolved by
+    :func:`_resolve_html_urls`.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    title_node = soup.find("title") or soup.find("h1")
+    title = title_node.get_text(" ", strip=True) if title_node else None
+    content = soup.find("article") or soup.find("main") or soup.body or soup
+
+    for node in content.find_all(["script", "style", "noscript", "template", "iframe", "nav", "footer", "aside", "form"]):
+        node.decompose()
+
+    return {"title": title or None, "content": str(content)}
+
+
 # Tokenize attributes only inside a start tag identified by HTMLParser. Keeping
 # source spans avoids rebuilding malformed markup before jsdom parses it.
 _ATTRIBUTE_RE = re.compile(r"""([^\s/>=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]*))?""")
@@ -154,20 +201,23 @@ class ReadabilityExtractor:
     def extract_article(self, html: str, *, url: str | None = None) -> Article:
         if url:
             html = _resolve_html_urls(html, url)
-        try:
-            article = simple_json_from_html_string(html, use_readability=True)
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            stderr = getattr(exc, "stderr", None)
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode(errors="replace")
-            stderr_info = f"; stderr={stderr.strip()}" if isinstance(stderr, str) and stderr.strip() else ""
-            logger.warning(
-                "Readability.js extraction failed with %s%s; falling back to pure-Python extraction",
-                type(exc).__name__,
-                stderr_info,
-                exc_info=True,
-            )
-            article = simple_json_from_html_string(html, use_readability=False)
+        if _has_readability_js():
+            try:
+                article = simple_json_from_html_string(html, use_readability=True)
+            except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                stderr = getattr(exc, "stderr", None)
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode(errors="replace")
+                stderr_info = f"; stderr={stderr.strip()}" if isinstance(stderr, str) and stderr.strip() else ""
+                logger.warning(
+                    "Readability.js extraction failed with %s%s; using link-preserving Python fallback",
+                    type(exc).__name__,
+                    stderr_info,
+                    exc_info=True,
+                )
+                article = _link_preserving_python_fallback(html)
+        else:
+            article = _link_preserving_python_fallback(html)
 
         html_content = article.get("content")
         if not html_content or not str(html_content).strip():
