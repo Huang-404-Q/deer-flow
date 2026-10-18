@@ -104,6 +104,16 @@ class TestClassifyCommand:
             "> ~/.zshrc",
             "> ~/.bash_profile",
             "> ~.bashrc",
+            # --- variable spelling of the home directory (#7029) ---
+            "rm -rf $HOME",
+            "rm -rf $HOME/",
+            "rm -rf ${HOME}/",
+            'rm -rf "$HOME/"',
+            "rm -rf $HOME/*",
+            "> $HOME/.bashrc",
+            ">> $HOME/.profile",
+            "> ${HOME}/.zshrc",
+            '> "${HOME}/.bash_profile"',
             # --- new: process environment leakage ---
             "cat /proc/self/environ",
             "cat /proc/1/environ",
@@ -398,6 +408,14 @@ class TestClassifyCommand:
             'echo "Today is $(date)"',  # safe $() — date is not in dangerous list
             "echo `whoami`",  # safe backtick — whoami is not in dangerous list
             "mkdir -p src/{components,utils}",  # brace expansion
+            # --- variable-spelling boundary (#7029): non-destructive reads and
+            # identifiers that merely start like HOME must stay allowed ---
+            "cat $HOME/.bashrc",
+            "ls $HOME/Documents",
+            "echo $HOME",
+            "rm -rf $HOMELESS",
+            "rm -rf $MY_HOME/",
+            "rm -rf ${HOME_CACHE}",
         ],
     )
     def test_safe_classified_as_pass(self, cmd):

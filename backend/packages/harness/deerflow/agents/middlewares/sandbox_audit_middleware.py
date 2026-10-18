@@ -46,10 +46,15 @@ _RISKY_SUBSTITUTION = rf"(?:[$<]\(\s*|`\s*){_RISKY_SUBSTITUTION_EXECUTABLES}"
 _CODE_STRING_INTERPRETERS = r"(?:(?:ba|da|k|z)?sh|python[\d.]*|perl|ruby|node|php)"
 _LEADING_FLAGS = r"(?:-\w+\s+){0,4}"
 
+# Home-directory spellings: ``~``, ``$HOME`` and ``${HOME}`` all expand to the
+# same directory on the host. The ``\b`` after ``HOME`` keeps ``$HOMELESS`` /
+# ``$MY_HOME`` from matching; ``{HOME}`` needs no boundary because ``}`` is one.
+_HOME_SPELLING = r"(?:~|\$(?:HOME\b|\{HOME\}))"
+
 # Each pattern is compiled once at import time.
 _HIGH_RISK_PATTERNS: list[re.Pattern[str]] = [
     # --- original rules (retained) ---
-    re.compile(r"rm\s+-[^\s]*r[^\s]*\s+(/\*?|~/?\*?|/home\b|/root\b)\s*$"),
+    re.compile(rf"rm\s+-[^\s]*r[^\s]*\s+(/\*?|{_HOME_SPELLING}/?\*?|/home\b|/root\b)\s*$"),
     re.compile(r"dd\s+if="),
     re.compile(r"mkfs"),
     re.compile(r"cat\s+/etc/shadow"),
@@ -66,7 +71,7 @@ _HIGH_RISK_PATTERNS: list[re.Pattern[str]] = [
     # --- overwrite system binaries ---
     re.compile(r">+\s*(/usr/bin/|/bin/|/sbin/)"),
     # --- overwrite shell startup files ---
-    re.compile(r">+\s*~/?\.(bashrc|profile|zshrc|bash_profile)"),
+    re.compile(rf">+\s*{_HOME_SPELLING}/?\.(bashrc|profile|zshrc|bash_profile)"),
     # --- process environment leakage ---
     re.compile(r"/proc/[^/]+/environ"),
     # --- dynamic linker hijack (one-step escalation) ---
