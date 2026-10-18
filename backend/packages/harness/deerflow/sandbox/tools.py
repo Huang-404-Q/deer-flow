@@ -1519,10 +1519,12 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
         name, remainder = match.group(1), match.group(2)
         if name == "PWD" and pwd_is_workspace:
             continue
-        # ``$1/1024`` and ``$1/$2`` are awk-style field arithmetic
-        # (``awk '{print $1/$2}'``), not paths: standard top-level host
-        # directories do not start with a digit.
-        if name.isdigit() and remainder.removeprefix("$")[:1].isdigit():
+        # ``$1/1024``, ``$1/$2``, ``$NF/2``, and ``$sum/$n`` are awk-style field
+        # arithmetic (``awk '{print $1/$2}'`` or ``awk '{print $NF/2}'``), not
+        # paths: standard top-level host directories do not start with a digit.
+        # Exempt when remainder starts with a digit or ``$`` (another variable).
+        first_char = remainder.removeprefix("$")[:1]
+        if first_char.isdigit() or remainder.startswith("$"):
             continue
         unsafe_paths.append(match.group() + remainder)
 
