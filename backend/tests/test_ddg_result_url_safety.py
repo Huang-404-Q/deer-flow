@@ -1,62 +1,68 @@
 """Tests for DDG search URL screening."""
 
-from unittest.mock import MagicMock, patch
+import json
+import sys
+from types import SimpleNamespace
 
 import pytest
 
-from deerflow.community.ddg_search.tools import web_search_tool
+from deerflow.community.ddg_search import tools
 
 
-@pytest.mark.anyio
-async def test_ddg_web_search_screens_result_urls():
-    """DDG web_search must screen result URLs for private/loopback addresses."""
-    mock_results = [
-        {"title": "Public", "href": "https://example.com/page", "body": "Safe result"},
-        {"title": "Private IP", "href": "http://192.168.1.1/admin", "body": "Should drop"},
-        {"title": "Loopback", "href": "http://127.0.0.1:8080/debug", "body": "Should drop"},
-        {"title": "Metadata", "href": "http://169.254.169.254/latest/meta-data/", "body": "Should drop"},
-    ]
+def _install_fake_ddgs(monkeypatch: pytest.MonkeyPatch, results: list[dict]) -> None:
+    """Exercise the public tool through the SDK boundary without network access."""
 
-    mock_config = MagicMock()
-    mock_config.get_tool_config.return_value = None
+    class FakeDDGS:
+        def __init__(self, timeout: int) -> None:
+            self.timeout = timeout
 
-    with (
-        patch("deerflow.community.ddg_search.tools._search_text", return_value=mock_results),
-        patch("deerflow.community.ddg_search.tools.get_app_config", return_value=mock_config),
-    ):
-        result_json = web_search_tool.invoke({"query": "test query"})
+        def text(self, query: str, **kwargs: object) -> list[dict]:
+            return results
 
-    import json
+    monkeypatch.setitem(sys.modules, "ddgs", SimpleNamespace(DDGS=FakeDDGS))
+    monkeypatch.setattr(tools, "get_app_config", lambda: SimpleNamespace(get_tool_config=lambda name: None))
 
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://example.com/page", True),
+        ("http://192.168.1.1/admin", False),
+        ("http://127.0.0.1:8080/debug", False),
+        ("http://169.254.169.254/latest/meta-data/", False),
+    ],
+)
+def test_ddg_web_search_screens_result_urls(monkeypatch: pytest.MonkeyPatch, url: str, expected: bool) -> None:
+    """The actual web_search tool returns only public result URLs."""
+    _install_fake_ddgs(monkeypatch, [{"title": "Test", "href": url, "body": "Snippet"}])
+
+    output = json.loads(tools.web_search_tool.invoke({"query": "test query"}))
+
+    assert len(output["results"]) == int(expected)
+    if expected:
+        assert output["results"][0]["url"] == url
+    else:
+        assert url not in json.dumps(output)
+
+
+def test_ddg_web_search_drops_only_unsafe_result_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A mixed result set keeps the safe row and drops private and loopback URLs."""
+    safe_url = "https://example.com/good"
+    private_url = "http://10.0.0.1/admin"
+    loopback_url = "http://localhost:3000/"
+    _install_fake_ddgs(
+        monkeypatch,
+        [
+            {"title": "Private", "href": private_url, "body": "Unsafe"},
+            {"title": "Public", "href": safe_url, "body": "Safe"},
+            {"title": "Loopback", "href": loopback_url, "body": "Unsafe"},
+        ],
+    )
+
+    result_json = tools.web_search_tool.invoke({"query": "test query"})
     output = json.loads(result_json)
-    results = output["results"]
-    assert len(results) == 1, f"Expected 1 safe result, got {len(results)}"
-    assert results[0]["url"] == "https://example.com/page"
-    assert "192.168" not in result_json
-    assert "127.0.0.1" not in result_json
-    assert "169.254" not in result_json
 
-
-@pytest.mark.anyio
-async def test_ddg_web_search_all_unsafe_returns_empty():
-    """DDG web_search with all unsafe URLs returns no results."""
-    mock_results = [
-        {"title": "Private", "href": "http://10.0.0.1/", "body": "Unsafe"},
-        {"title": "Local", "href": "http://localhost:3000/", "body": "Unsafe"},
-    ]
-
-    mock_config = MagicMock()
-    mock_config.get_tool_config.return_value = None
-
-    with (
-        patch("deerflow.community.ddg_search.tools._search_text", return_value=mock_results),
-        patch("deerflow.community.ddg_search.tools.get_app_config", return_value=mock_config),
-    ):
-        result_json = web_search_tool.invoke({"query": "test query"})
-
-    import json
-
-    output = json.loads(result_json)
-    results = output["results"]
-    assert isinstance(results, list)
-    assert len(results) == 0
+    assert output["total_results"] == 1
+    assert output["results"][0]["url"] == safe_url
+    assert private_url not in result_json
+    assert loopback_url not in result_json
