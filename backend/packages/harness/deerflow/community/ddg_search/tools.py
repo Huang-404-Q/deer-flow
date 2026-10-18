@@ -9,6 +9,7 @@ from langchain.tools import tool
 
 from deerflow.community.search_max_results import DEFAULT_MAX_RESULTS, coerce_max_results
 from deerflow.community.search_time_range import DDGS_TIMELIMIT_BY_TIME_RANGE, SearchTimeRange
+from deerflow.community.url_safety import safe_public_result_url as _safe_public_url
 from deerflow.config import get_app_config
 
 logger = logging.getLogger(__name__)
@@ -218,14 +219,19 @@ def web_search_tool(
     if not results:
         return json.dumps({"error": "No results found", "query": query}, ensure_ascii=False)
 
-    normalized_results = [
-        {
-            "title": r.get("title", ""),
-            "url": r.get("href", r.get("link", "")),
-            "content": r.get("body", r.get("snippet", "")),
-        }
-        for r in results
-    ]
+    normalized_results = []
+    for r in results:
+        raw_url = r.get("href", r.get("link", ""))
+        screened_url = _safe_public_url(raw_url) if raw_url else ""
+        if not screened_url:
+            continue
+        normalized_results.append(
+            {
+                "title": r.get("title", ""),
+                "url": screened_url,
+                "content": r.get("body", r.get("snippet", "")),
+            }
+        )
 
     output = {
         "query": query,
