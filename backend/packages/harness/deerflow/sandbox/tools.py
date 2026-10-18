@@ -1158,6 +1158,48 @@ def _is_in_spans(position: int, spans: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in spans)
 
 
+def _single_quoted_spans(command: str) -> list[tuple[int, int]]:
+    """Half-open spans of single-quoted regions in *command*.
+
+    Inside single quotes bash performs no expansion, so a ``$NAME/...``
+    sequence there is literal text or an awk/perl field reference — never a
+    host path. A ``'`` inside double quotes is literal and does not open a
+    single-quoted region; a backslash outside single quotes escapes the next
+    character. There is no escape inside single quotes, so a simple toggle is
+    exact.
+    """
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    in_double = False
+    i = 0
+    n = len(command)
+    while i < n:
+        ch = command[i]
+        if start is not None:
+            if ch == "'":
+                spans.append((start, i + 1))
+                start = None
+            i += 1
+            continue
+        if in_double:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "'":
+            start = i
+        elif ch == '"':
+            in_double = True
+        i += 1
+    return spans
+
+
 def _has_dotdot_path_segment(token: str) -> bool:
     if _is_non_file_url_token(token):
         return False
@@ -1513,6 +1555,7 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
     # The prose exemption used above does not apply: ``$HOME/文档`` is a real
     # host directory.
     pwd_is_workspace = not _PWD_REBIND_PATTERN.search(command)
+    single_quoted_spans = _single_quoted_spans(command)
     for match in _SHELL_VARIABLE_PATH_PATTERN.finditer(command):
         if _is_in_spans(match.start(), url_spans):
             continue
@@ -1523,6 +1566,14 @@ def validate_local_bash_command_paths(command: str, thread_data: ThreadDataState
         # (``awk '{print $1/$2}'``), not paths: standard top-level host
         # directories do not start with a digit.
         if name.isdigit() and remainder.removeprefix("$")[:1].isdigit():
+            continue
+        # ``$NF/2`` and ``$sum/$n`` are the same awk field arithmetic, but the
+        # variable is a *name*. That is only unambiguous inside single quotes:
+        # bash does not expand the variable there (the text is literal, or an
+        # awk/perl program), so ``$NF/2`` cannot name a host path. The same
+        # spelling outside quotes — ``$HOME/2`` — still names the file ``2``
+        # under ``$HOME``, so it stays rejected.
+        if _is_in_spans(match.start(), single_quoted_spans) and (remainder[:1].isdigit() or remainder[:1] == "$"):
             continue
         unsafe_paths.append(match.group() + remainder)
 

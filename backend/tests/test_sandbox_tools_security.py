@@ -1080,6 +1080,10 @@ def test_validate_local_bash_command_paths_blocks_brace_expansion_host_paths(com
         ("cat $1/$2/etc/passwd", "$2/etc/passwd"),
         # Non-ASCII after a variable prefix is still a host path.
         ("cat $HOME/文档/marker", "$HOME/文档/marker"),
+        # A named variable with a numeric remainder is only exempted inside
+        # single quotes (awk field arithmetic); outside quotes ``$HOME/2`` is a
+        # real host path and stays blocked (#7021).
+        ("cat $HOME/2", "$HOME/2"),
         # ``~name`` expands to that user's home.
         ("cat ~root/.ssh/id_rsa", "~root/.ssh/id_rsa"),
         ("ls ~deploy/", "~deploy/"),
@@ -1113,6 +1117,9 @@ def test_validate_local_bash_command_paths_blocks_variable_prefixed_host_paths(c
         # awk field arithmetic is not a path.
         "du -k /mnt/user-data/workspace | awk '{print $1/1024}'",
         "awk -F, '{print $1/$2}' /mnt/user-data/uploads/data.csv",
+        # Named awk fields are the same arithmetic, not a host path (#7021).
+        "awk '{print $NF/2}' /mnt/user-data/workspace/data.txt",
+        "awk '{print $sum/$n}' /mnt/user-data/workspace/data.txt",
     ],
 )
 def test_validate_local_bash_command_paths_allows_non_path_variable_uses(command: str) -> None:
