@@ -94,7 +94,10 @@ def observe_provider(provider):
         if trace is None:
             return await acquire(*args, **kwargs)
         trace.mark("acquire_started")
-        entry = {"started": time.monotonic(), "sandbox_id": None}
+        # Record provenance from event state, not timestamps: a coarse monotonic
+        # clock (Windows ticks at ~15.6 ms) can stamp an acquire and the tool
+        # request in one tick, so a timestamp comparison is not deterministic.
+        entry = {"started": time.monotonic(), "sandbox_id": None, "began_before_tool": not trace.tool_requested.is_set()}
         trace.acquisitions.append(entry)
         try:
             sid = await acquire(*args, **kwargs)
@@ -169,6 +172,17 @@ class ScriptedModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=answer)])
 
 
+def _speculative_acquisitions(trace: Trace) -> list[dict[str, Any]]:
+    """Acquisitions that began before the tool requested a sandbox.
+
+    Provenance comes from event state (``began_before_tool``), not timestamps:
+    on coarse-clock hosts (Windows ``time.monotonic()`` ticks at ~15.6 ms) an
+    acquire and the tool request can land in the same tick, so a strict
+    ``started < requested`` comparison is not deterministic (#7044).
+    """
+    return [entry for entry in trace.acquisitions if entry["began_before_tool"] and entry["sandbox_id"] is not None]
+
+
 async def run_case(provider, app_config, *, case: str, prewarm: bool, model_delay: float, thread_id: str, user_id: str, trace: Trace | None = None, model_gate=None) -> dict[str, Any]:
     """Run the real graph; even errors/cancellation use the runtime's final fence."""
     if case not in PROMPTS:
@@ -220,8 +234,7 @@ async def run_case(provider, app_config, *, case: str, prewarm: bool, model_dela
     tool_valid = len(tool_messages) == 1 and str(tool_messages[0].content).strip() == COMMAND_MARKER
     owner = sandbox_lease_owner(context)
     lease_remaining = owner is not None and get_sandbox_lease_manager(provider).binding_for(owner) is not None
-    requested = trace.timestamps.get("tool_requested", float("inf"))
-    speculative = [entry for entry in trace.acquisitions if entry["started"] < requested and entry["sandbox_id"] is not None]
+    speculative = _speculative_acquisitions(trace)
 
     def duration(start: str, end: str) -> float | None:
         stamps = trace.timestamps

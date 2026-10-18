@@ -111,6 +111,23 @@ async def run_after_prewarm_ready(provider, config, *, case, thread_id):
         await asyncio.gather(task, return_exceptions=True)
 
 
+def test_speculative_acquisitions_use_event_state_not_timestamps():
+    """A coarse clock can stamp an acquire and the tool request in one tick;
+    classification must come from event state, not ``started < requested``."""
+    trace = bench.Trace()
+    trace.timestamps["tool_requested"] = 1000.0
+    trace.acquisitions = [
+        # Same tick as the tool request, but began before it (speculative).
+        {"started": 1000.0, "sandbox_id": "spec", "began_before_tool": True},
+        # Same tick, began after the tool request (baseline acquire).
+        {"started": 1000.0, "sandbox_id": "lazy", "began_before_tool": False},
+        # Began before, but no sandbox was assigned (failed acquire).
+        {"started": 1000.0, "sandbox_id": None, "began_before_tool": True},
+    ]
+
+    assert [entry["sandbox_id"] for entry in bench._speculative_acquisitions(trace)] == ["spec"]
+
+
 @pytest.mark.anyio
 async def test_real_graph_prewarm_starts_during_model_and_is_claimed_once(observed):
     provider, config = observed
