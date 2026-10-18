@@ -16,6 +16,27 @@ from deerflow.config.knowledge_base_config import KnowledgeBaseConfig
 from deerflow.tools.tools import get_available_tools
 
 
+@pytest.fixture(autouse=True)
+def _pin_official_package_index(monkeypatch) -> None:
+    """Keep host uv index configuration (e.g. a blocking mirror) out of this suite.
+
+    The upgrade-script tests shell out to ``scripts/config-upgrade.sh``, which
+    runs ``uv run --project <real backend>`` and re-resolves workspace splits
+    against the package index. A host-configured mirror that blocks some
+    packages (e.g. a CN corporate mirror returning 403 for ``hatchling``)
+    fails the suite even though the code under test is fine. Pin the default
+    index (which also wins over the legacy ``UV_INDEX_URL``) and drop the
+    extra-index env channels, whose entries take priority over the default
+    index. Tests that install their own index env keep precedence.
+
+    Mirrors #6142's fixture for ``test_extension_manager.py``, which has the
+    same host-uv-bleed failure mode.
+    """
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
+    monkeypatch.delenv("UV_INDEX", raising=False)
+    monkeypatch.delenv("UV_EXTRA_INDEX_URL", raising=False)
+
+
 def test_knowledge_base_config_is_provider_agnostic() -> None:
     assert set(KnowledgeBaseConfig.model_fields) == {"enabled", "scope_selection_enabled"}
     config = KnowledgeBaseConfig.model_validate(
