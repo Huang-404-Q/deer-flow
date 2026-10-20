@@ -21,6 +21,13 @@ class ContextSize(BaseModel):
     type: ContextSizeType = Field(description="Type of context size specification")
     value: int | float = Field(description="Value for the context size specification")
 
+    @field_validator("value", mode="before")
+    @classmethod
+    def _reject_boolean_value(cls, value: object, info: ValidationInfo) -> object:
+        # Pydantic coerces true/false to 1/1.0 before the range validator, so a
+        # boolean would silently become a one-message or full-fraction threshold.
+        return reject_boolean(value, info, kind="a number")
+
     @model_validator(mode="after")
     def _validate_value_range(self) -> "ContextSize":
         """Reject value ranges that would silently produce a dead threshold.

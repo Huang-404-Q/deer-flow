@@ -3,9 +3,10 @@
 from typing import cast
 
 import pytest
-from pydantic import ValidationInfo
+from pydantic import ValidationError, ValidationInfo
 
 from deerflow.config._boolean_guards import reject_boolean
+from deerflow.config.summarization_config import ContextSize
 
 
 class _Probe:
@@ -32,3 +33,9 @@ def test_reject_boolean_passes_numbers_through() -> None:
 def test_reject_boolean_custom_kind_wording() -> None:
     with pytest.raises(ValueError, match="command_timeout must be a number of seconds or null, not a boolean"):
         reject_boolean(True, _info("command_timeout"), kind="a number of seconds or null")
+
+
+@pytest.mark.parametrize("size_type", ["fraction", "tokens", "messages"])
+def test_context_size_rejects_boolean_value(size_type: str) -> None:
+    with pytest.raises(ValidationError, match="value must be a number, not a boolean"):
+        ContextSize(type=size_type, value=True)
