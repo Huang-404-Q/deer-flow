@@ -686,6 +686,44 @@ def test_load_codex_cli_credential_ignores_non_string_account_id(tmp_path, monke
     assert cred.account_id == ""
 
 
+@pytest.mark.parametrize("top_level_account_id", [12345, {"nested": "id"}, ["id"], True])
+def test_load_codex_cli_credential_falls_through_unusable_top_level_account_id(tmp_path, monkeypatch, top_level_account_id):
+    auth_path = tmp_path / "auth.json"
+    auth_path.write_text(
+        json.dumps(
+            {
+                "access_token": "codex-access-token",
+                "account_id": top_level_account_id,
+                "tokens": {"account_id": "acct-nested"},
+            }
+        )
+    )
+    monkeypatch.setenv("CODEX_AUTH_PATH", str(auth_path))
+
+    cred = load_codex_cli_credential()
+
+    assert cred is not None
+    assert cred.account_id == "acct-nested"
+
+
+def test_load_codex_cli_credential_strips_account_id_whitespace(tmp_path, monkeypatch):
+    auth_path = tmp_path / "auth.json"
+    auth_path.write_text(
+        json.dumps(
+            {
+                "access_token": "codex-access-token",
+                "tokens": {"account_id": "  acct-nested\n"},
+            }
+        )
+    )
+    monkeypatch.setenv("CODEX_AUTH_PATH", str(auth_path))
+
+    cred = load_codex_cli_credential()
+
+    assert cred is not None
+    assert cred.account_id == "acct-nested"
+
+
 @pytest.mark.parametrize("access_token", [999, {"nested": "token"}, ["token-list"]])
 def test_load_codex_cli_credential_ignores_non_string_access_token(tmp_path, monkeypatch, access_token):
     auth_path = tmp_path / "auth.json"

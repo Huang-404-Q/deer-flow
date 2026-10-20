@@ -268,10 +268,13 @@ def load_codex_cli_credential() -> CodexCliCredential | None:
         if isinstance(candidate, str) and candidate.strip():
             access_token = candidate.strip()
             break
-    account_id = data.get("account_id") or tokens.get("account_id", "")
-    if not isinstance(account_id, str):
-        logger.debug("Codex CLI credentials file has a non-string account_id; using no account")
-        account_id = ""
+    # Same fallthrough rule as access_token: a truthy but unusable top-level
+    # value (e.g. a number or an object) must not hide a usable nested one.
+    account_id = ""
+    for candidate in (data.get("account_id"), tokens.get("account_id")):
+        if isinstance(candidate, str) and candidate.strip():
+            account_id = candidate.strip()
+            break
     if not access_token:
         logger.debug("Codex CLI credentials file exists but no string token found")
         return None
