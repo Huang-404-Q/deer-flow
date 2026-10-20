@@ -17,7 +17,13 @@ export function getLocaleFromCookie(): string | null {
   for (const cookie of cookies) {
     const [name, value] = cookie.trim().split("=");
     if (name === LOCALE_COOKIE_NAME) {
-      return decodeURIComponent(value ?? "");
+      try {
+        return decodeURIComponent(value ?? "");
+      } catch {
+        // A malformed cookie must not crash rendering; ignore it like the
+        // server-side reader does.
+        return null;
+      }
     }
   }
   return null;
