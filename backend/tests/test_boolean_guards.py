@@ -3,9 +3,10 @@
 from typing import cast
 
 import pytest
-from pydantic import ValidationInfo
+from pydantic import ValidationError, ValidationInfo
 
 from deerflow.config._boolean_guards import reject_boolean
+from deerflow.config.token_budget_config import TokenBudgetConfig
 
 
 class _Probe:
@@ -32,3 +33,15 @@ def test_reject_boolean_passes_numbers_through() -> None:
 def test_reject_boolean_custom_kind_wording() -> None:
     with pytest.raises(ValueError, match="command_timeout must be a number of seconds or null, not a boolean"):
         reject_boolean(True, _info("command_timeout"), kind="a number of seconds or null")
+
+
+@pytest.mark.parametrize("field", ["max_tokens", "max_input_tokens", "max_output_tokens"])
+def test_token_budget_rejects_boolean_token_limits(field: str) -> None:
+    with pytest.raises(ValidationError, match=f"{field} must be an integer, not a boolean"):
+        TokenBudgetConfig(**{field: True})
+
+
+@pytest.mark.parametrize("field", ["warn_threshold", "hard_stop_threshold"])
+def test_token_budget_rejects_boolean_thresholds(field: str) -> None:
+    with pytest.raises(ValidationError, match=f"{field} must be a number, not a boolean"):
+        TokenBudgetConfig(**{field: True})
