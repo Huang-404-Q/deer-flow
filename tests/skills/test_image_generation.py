@@ -424,3 +424,53 @@ def test_guess_mime_by_extension():
     assert img._guess_mime("/a/b.webp") == "image/webp"
     assert img._guess_mime("/a/b.jpg") == "image/jpeg"
     assert img._guess_mime("/a/b.unknown") == "image/jpeg"
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_mime"),
+    [
+        ("reference.png", "image/png"),
+        ("reference.webp", "image/webp"),
+        ("reference.jpg", "image/jpeg"),
+    ],
+)
+def test_gemini_reference_image_uses_its_own_mime_type(
+    monkeypatch, tmp_path, filename, expected_mime
+):
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, **kw):
+        captured["json"] = json
+        return FakeResp(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "inlineData": {
+                                        "data": base64.b64encode(b"out").decode()
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(img.requests, "post", fake_post)
+    # Keep the test offline: the reference only needs to pass validation.
+    monkeypatch.setattr(img, "validate_image", lambda path: True)
+    reference = tmp_path / filename
+    reference.write_bytes(b"image-bytes")
+    prompt_file = tmp_path / "p.txt"
+    prompt_file.write_text("a cat", encoding="utf-8")
+
+    img.generate_image(
+        str(prompt_file), [str(reference)], str(tmp_path / "o.png"), "1:1"
+    )
+
+    parts = captured["json"]["contents"][0]["parts"]
+    assert parts[0]["inlineData"]["mimeType"] == expected_mime
