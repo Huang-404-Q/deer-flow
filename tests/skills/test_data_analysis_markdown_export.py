@@ -37,3 +37,12 @@ def test_query_markdown_export_keeps_each_cell_on_one_line(
         "| --- |",
         f"| {expected_value} |",
     ]
+
+
+@pytest.mark.parametrize("filename", ["result.csv", "result.json", "result.md"])
+def test_query_export_accepts_a_bare_filename(tmp_path, monkeypatch, filename):
+    analysis = runpy.run_path(str(SCRIPT))
+    monkeypatch.chdir(tmp_path)
+    with duckdb.connect() as con:
+        analysis["action_query"](con, "SELECT 1 AS n", {}, filename)
+    assert (tmp_path / filename).is_file()
