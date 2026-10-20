@@ -1,5 +1,10 @@
 import { expect, test } from "@rstest/core";
-import { FilePlayIcon, FileTextIcon, ImageIcon } from "lucide-react";
+import {
+  FileCodeIcon,
+  FilePlayIcon,
+  FileTextIcon,
+  ImageIcon,
+} from "lucide-react";
 
 import {
   canBrowserPreviewFile,
@@ -54,4 +59,24 @@ test("values the language name, never the extension it came from", () => {
     isCodeFile: true,
     language: "julia",
   });
+});
+
+test("detects extensions independently of the host locale", () => {
+  // Turkish lowercases "I" to a dotless "ı"; extension keys are ASCII.
+  const original = Object.getOwnPropertyDescriptor(
+    String.prototype,
+    "toLocaleLowerCase",
+  )!.value as (this: string) => string;
+  String.prototype.toLocaleLowerCase = function () {
+    return this.toLowerCase().replace(/i/g, "ı");
+  };
+  try {
+    expect(checkCodeFile("settings.INI")).toEqual({
+      isCodeFile: true,
+      language: "ini",
+    });
+    expect(getFileIcon("settings.INI").type).toBe(FileCodeIcon);
+  } finally {
+    String.prototype.toLocaleLowerCase = original;
+  }
 });

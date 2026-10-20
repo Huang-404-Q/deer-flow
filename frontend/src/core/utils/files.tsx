@@ -173,7 +173,7 @@ export function getFileName(filepath: string) {
 }
 
 export function getFileExtension(filepath: string) {
-  return getFileName(filepath).split(".").pop()!.toLocaleLowerCase();
+  return getFileName(filepath).split(".").pop()!.toLowerCase();
 }
 
 export function checkCodeFile(
@@ -201,7 +201,7 @@ export function canBrowserPreviewFile(filepath: string) {
 
 export function getFileExtensionDisplayName(filepath: string) {
   const fileName = getFileName(filepath);
-  const extension = fileName.split(".").pop()!.toLocaleLowerCase();
+  const extension = fileName.split(".").pop()!.toLowerCase();
   switch (extension) {
     case "doc":
     case "docx":
