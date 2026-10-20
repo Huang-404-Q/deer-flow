@@ -60,8 +60,8 @@ def generate_ppt(
 
         # Load and process image
         with Image.open(image_path) as img:
-            # Convert to RGB if necessary (for PNG with transparency)
-            if img.mode in ("RGBA", "P"):
+            # JPEG cannot encode RGBA/P, LA, I;16 or other non-RGB modes.
+            if img.mode != "RGB":
                 img = img.convert("RGB")
 
             # Calculate dimensions to fill slide while maintaining aspect ratio
@@ -119,6 +119,9 @@ def generate_ppt(
                     text_frame.text = "\n".join(notes)
 
     # Save presentation
+    parent = os.path.dirname(output_file)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     prs.save(output_file)
 
     return f"Successfully generated presentation with {len(slide_images)} slides to {output_file}"
