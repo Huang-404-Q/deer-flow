@@ -230,3 +230,53 @@ def test_gemini_forwards_aspect_ratio_to_predict_request(monkeypatch, tmp_path):
 
     assert "predictLongRunning" in captured["url"]
     assert captured["json"]["parameters"]["aspectRatio"] == "9:16"
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_mime"),
+    [
+        ("reference.png", "image/png"),
+        ("reference.webp", "image/webp"),
+        ("reference.jpg", "image/jpeg"),
+    ],
+)
+def test_gemini_reference_image_uses_its_own_mime_type(
+    monkeypatch, tmp_path, filename, expected_mime
+):
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, **kw):
+        captured["json"] = json
+        return FakeResp(json_data={"name": "operations/op"})
+
+    def fake_get(url, headers=None, **kw):
+        return FakeResp(
+            json_data={
+                "done": True,
+                "response": {
+                    "generateVideoResponse": {
+                        "generatedSamples": [
+                            {"video": {"uri": "https://example.test/v.mp4"}}
+                        ]
+                    }
+                },
+            },
+        )
+
+    def fake_download(uri, output_file):
+        with open(output_file, "wb") as f:
+            f.write(b"video")
+
+    monkeypatch.setattr(vid.requests, "post", fake_post)
+    monkeypatch.setattr(vid.requests, "get", fake_get)
+    monkeypatch.setattr(vid, "download", fake_download)
+    reference = tmp_path / filename
+    reference.write_bytes(b"image-bytes")
+    pf = tmp_path / "p.json"
+    pf.write_text("a tall cat", encoding="utf-8")
+
+    vid.generate_video(str(pf), [str(reference)], str(tmp_path / "v.mp4"), "9:16")
+
+    ref = captured["json"]["instances"][0]["referenceImages"][0]
+    assert ref["image"]["mimeType"] == expected_mime

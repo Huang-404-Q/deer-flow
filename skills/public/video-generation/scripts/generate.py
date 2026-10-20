@@ -154,8 +154,13 @@ def _generate_video_gemini(
         with open(reference_image, "rb") as f:
             image_b64 = base64.b64encode(f.read()).decode("utf-8")
         reference_payload.append(
-            {"image": {"mimeType": "image/jpeg", "bytesBase64Encoded": image_b64},
-             "referenceType": "asset"}
+            {
+                "image": {
+                    "mimeType": _guess_mime(reference_image),
+                    "bytesBase64Encoded": image_b64,
+                },
+                "referenceType": "asset",
+            }
         )
     if reference_payload:
         request_json["instances"][0]["referenceImages"] = reference_payload
